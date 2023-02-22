@@ -1,8 +1,14 @@
 #include "Renderer.h"
 
 #include "Walnut/Random.h"
+#include "ThreadLocalRandom.h"
 
 #include <execution>
+
+
+// PREPROCESSOR SWITCHES
+#define THREAD_LOCAL_RANDOM
+
 
 namespace Utils {
 
@@ -135,7 +141,11 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 
 		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
 		ray.Direction = glm::reflect(ray.Direction,
+#ifdef THREAD_LOCAL_RANDOM
+			payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f));
+#else
 			payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f));
+#endif
 	}
 
 	return glm::vec4(color, 1.0f);
