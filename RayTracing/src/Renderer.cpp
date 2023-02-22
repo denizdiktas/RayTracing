@@ -8,6 +8,7 @@
 
 // PREPROCESSOR SWITCHES
 #define THREAD_LOCAL_RANDOM
+#define USE_CACHED_RANDOM_NORMALS
 
 
 namespace Utils {
@@ -23,6 +24,23 @@ namespace Utils {
 		return result;
 	}
 
+}
+
+
+namespace {
+	const int numRandomNormals = 1024 * 1024;
+	thread_local int currentRandomNormal = 0;
+	std::vector<glm::vec3> randomNormals;
+}
+
+Renderer::Renderer()
+{
+#ifdef USE_CACHED_RANDOM_NORMALS
+	randomNormals.reserve(numRandomNormals);
+	for (int i = 0; i < numRandomNormals; i++)
+		randomNormals.push_back(Walnut::Random::Vec3(-.5, .5));
+	//randomNormals.push_back(glm::normalize(Walnut::Random::Vec3(-.5, .5)));
+#endif
 }
 
 void Renderer::OnResize(uint32_t width, uint32_t height)
@@ -141,11 +159,16 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 
 		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
 		ray.Direction = glm::reflect(ray.Direction,
-#ifdef THREAD_LOCAL_RANDOM
-			payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f));
+#ifdef USE_CACHED_RANDOM_NORMALS
+			payload.WorldNormal + material.Roughness * randomNormals[currentRandomNormal++ % numRandomNormals]);
 #else
+	#ifdef THREAD_LOCAL_RANDOM
+			payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f));
+	#else
 			payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f));
+	#endif
 #endif
+
 	}
 
 	return glm::vec4(color, 1.0f);
