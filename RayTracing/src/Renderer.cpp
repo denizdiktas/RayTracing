@@ -11,6 +11,10 @@
 #define THREAD_LOCAL_RANDOM
 #define USE_CACHED_RANDOM_NORMALS
 
+// IMPORTANT: you have to select one of the task granularity levels below
+//#define MT_TASK_GRANULARITY_PIXEL
+#define MT_TASK_GRANULARITY_ROW
+
 
 namespace Utils {
 
@@ -84,6 +88,8 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		memset(m_AccumulationData, 0, m_FinalImage->GetWidth() * m_FinalImage->GetHeight() * sizeof(glm::vec4));
 
 #ifdef MT
+	#ifdef MT_TASK_GRANULARITY_PIXEL
+	
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(),
 		[this](uint32_t y)
 		{
@@ -91,9 +97,23 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 			[this, y](uint32_t x)
 				{
 					CalcImageData(x, y);
-
 				});
 		});
+	
+	#elif defined(MT_TASK_GRANULARITY_ROW)
+
+	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(),
+		[this](uint32_t y)
+		{
+			for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
+			{
+				CalcImageData(x, y);
+			}
+		});
+
+#endif
+
+
 
 #else
 
