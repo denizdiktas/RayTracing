@@ -13,7 +13,11 @@
 
 // IMPORTANT: you have to select one of the task granularity levels below
 //#define MT_TASK_GRANULARITY_PIXEL
-#define MT_TASK_GRANULARITY_ROW
+//#define MT_TASK_GRANULARITY_ROW
+//#define MT_TASK_GRANULARITY_COL
+#define MT_TASK_GRANULARITY_TILE
+static const int tileSizeX = 4;
+static const int tileSizeY = 4;
 
 
 namespace Utils {
@@ -111,7 +115,50 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 			}
 		});
 
-#endif
+	#elif defined(MT_TASK_GRANULARITY_COL)
+
+	std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(),
+		[this](uint32_t x)
+		{
+			for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++)
+			{
+				CalcImageData(x, y);
+			}
+		});
+
+	#elif defined(MT_TASK_GRANULARITY_TILE)
+
+	const auto width = m_FinalImage->GetWidth();
+	const auto height = m_FinalImage->GetHeight();
+	const auto numTilesX = (width + tileSizeX - 1) / tileSizeX;
+	const auto numTilesY = (height + tileSizeY - 1) / tileSizeY;
+	std::vector<int> tileIterX, tileIterY;
+	tileIterX.reserve(numTilesX);
+	tileIterY.reserve(numTilesY);
+	for (int i = 0; i < numTilesX; i++)
+		tileIterX.push_back(i);
+	for (int i = 0; i < numTilesY; i++)
+		tileIterY.push_back(i);
+	
+	std::for_each(std::execution::par, tileIterY.begin(), tileIterY.end(),
+		[&](uint32_t ty)
+		{
+			std::for_each(std::execution::par, tileIterX.begin(), tileIterX.end(),
+			[&](uint32_t tx)
+				{
+					const auto xmin = tx * tileSizeX;
+					const auto ymin = ty * tileSizeX;
+					const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width);
+					const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height);
+					for (int y = ymin; y < ymax; y++)
+					{
+						for (int x = xmin; x < xmax; x++)
+							CalcImageData(x, y);
+					}
+				});
+		});
+
+	#endif
 
 
 
