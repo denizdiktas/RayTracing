@@ -45,6 +45,8 @@ namespace {
 	
 	std::atomic<int> globalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
 	std::vector<float> totalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
+
+	std::vector<int> tileIterX, tileIterY;
 }
 
 Renderer::Renderer()
@@ -86,12 +88,22 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 		m_ImageVerticalIter[i] = i;
 
 
+	// for tiled rendering
+	const auto numTilesX = (width + tileSizeX - 1) / tileSizeX;
+	const auto numTilesY = (height + tileSizeY - 1) / tileSizeY;
+	tileIterX.resize(numTilesX);
+	tileIterY.resize(numTilesY);
+	for (int i = 0; i < numTilesX; i++)
+		tileIterX[i] = i;
+	for (int i = 0; i < numTilesY; i++)
+		tileIterY[i] = i;
+
 	// be conservative for the number of threads (max of columns and rows)
-	const auto maxThreads = std::max(m_FinalImage->GetWidth(), m_FinalImage->GetHeight());
+	const auto maxThreads = std::max(width, height);
 
 	// NOTE: for MT_TASK_GRANULARITY_PIXEL, the total number of threads might seem to be much more, but it turns out not to be the case
 	//       but if you suspect that it might be the case, use the following line:
-	// const auto maxThreads = m_FinalImage->GetWidth() * m_FinalImage->GetHeight();
+	// const auto maxThreads = width * height;
 
 	totalFrameTimePerThread.resize(maxThreads, 0);
 }
@@ -153,19 +165,9 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		});
 
 	#elif defined(MT_TASK_GRANULARITY_TILE)
-
+	
 	const auto width = m_FinalImage->GetWidth();
 	const auto height = m_FinalImage->GetHeight();
-	const auto numTilesX = (width + tileSizeX - 1) / tileSizeX;
-	const auto numTilesY = (height + tileSizeY - 1) / tileSizeY;
-	std::vector<int> tileIterX, tileIterY;
-	tileIterX.reserve(numTilesX);
-	tileIterY.reserve(numTilesY);
-	for (int i = 0; i < numTilesX; i++)
-		tileIterX.push_back(i);
-	for (int i = 0; i < numTilesY; i++)
-		tileIterY.push_back(i);
-	
 	std::for_each(std::execution::par, tileIterY.begin(), tileIterY.end(),
 		[&](uint32_t ty)
 		{
