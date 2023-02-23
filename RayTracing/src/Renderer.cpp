@@ -1,8 +1,10 @@
 #include "Renderer.h"
 
 #include "Walnut/Random.h"
+#include "Walnut/Timer.h"
 #include "ThreadLocalRandom.h"
 
+#include <atomic>
 #include <execution>
 
 
@@ -40,6 +42,9 @@ namespace {
 	const int numRandomNormals = 1024 * 1024;
 	thread_local int currentRandomNormal = 0;
 	std::vector<glm::vec3> randomNormals;
+	
+	std::atomic<int> globalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
+	std::vector<float> totalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
 }
 
 Renderer::Renderer()
@@ -79,6 +84,16 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 		m_ImageHorizontalIter[i] = i;
 	for (uint32_t i = 0; i < height; i++)
 		m_ImageVerticalIter[i] = i;
+
+
+	// be conservative for the number of threads (max of columns and rows)
+	const auto maxThreads = std::max(m_FinalImage->GetWidth(), m_FinalImage->GetHeight());
+
+	// NOTE: for MT_TASK_GRANULARITY_PIXEL, the total number of threads might seem to be much more, but it turns out not to be the case
+	//       but if you suspect that it might be the case, use the following line:
+	// const auto maxThreads = m_FinalImage->GetWidth() * m_FinalImage->GetHeight();
+
+	totalFrameTimePerThread.resize(maxThreads, 0);
 }
 
 
@@ -90,6 +105,11 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	
 	if (m_FrameIndex == 1)
 		memset(m_AccumulationData, 0, m_FinalImage->GetWidth() * m_FinalImage->GetHeight() * sizeof(glm::vec4));
+
+
+	// accTime keeps track of the total time per frame including the SCHEDULING OVERHEAD
+	static float  accTime = 0.f, lastAccTime = 0.f;
+	Walnut::Timer  timer;
 
 #ifdef MT
 	#ifdef MT_TASK_GRANULARITY_PIXEL
@@ -109,10 +129,16 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(),
 		[this](uint32_t y)
 		{
+			thread_local static const int tid = globalThreadCount++;
+			Walnut::Timer localTimer;
+			
 			for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
 			{
 				CalcImageData(x, y);
 			}
+
+			const auto localElapsedTime = localTimer.ElapsedMillis();
+			totalFrameTimePerThread[tid] += localElapsedTime;
 		});
 
 	#elif defined(MT_TASK_GRANULARITY_COL)
@@ -146,6 +172,9 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 			std::for_each(std::execution::par, tileIterX.begin(), tileIterX.end(),
 			[&](uint32_t tx)
 				{
+					thread_local static const int tid = globalThreadCount++;
+					Walnut::Timer localTimer;
+
 					const auto xmin = tx * tileSizeX;
 					const auto ymin = ty * tileSizeX;
 					const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width);
@@ -155,12 +184,13 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 						for (int x = xmin; x < xmax; x++)
 							CalcImageData(x, y);
 					}
+
+					const auto localElapsedTime = localTimer.ElapsedMillis();
+					totalFrameTimePerThread[tid] += localElapsedTime;
 				});
 		});
 
 	#endif
-
-
 
 #else
 
@@ -173,13 +203,39 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	}
 #endif
 
+	auto elapsed = timer.ElapsedMillis();
+
+
 	m_FinalImage->SetData(m_ImageData);
 
 	if (m_Settings.Accumulate)
 		m_FrameIndex++;
 	else
 		m_FrameIndex = 1;
+
+
+	accTime += elapsed;
+	if ((accTime - lastAccTime) > 1000)
+	{
+		std::cout << "---------------------------------\n";
+		// show all average time in each thread:
+		float minAvgTime = std::numeric_limits<float>::max();
+		float maxAvgTime = std::numeric_limits<float>::min();
+		for (int i = 0; i < globalThreadCount; i++)
+		{
+			const auto currentAvgTime = totalFrameTimePerThread[i] / m_FrameIndex;
+			minAvgTime = std::min(minAvgTime, currentAvgTime);
+			maxAvgTime = std::max(maxAvgTime, currentAvgTime);
+			std::cout << i << ": " << currentAvgTime << std::endl;
+		}
+		std::cout << "*** min thread avg-time = " << minAvgTime << std::endl;
+		std::cout << "*** max thread avg-time = " << maxAvgTime << std::endl;
+		std::cout << "*** measured avg time including overhead = " << accTime / m_FrameIndex << std::endl;
+		lastAccTime = accTime;
+	}
 }
+
+
 void Renderer::CalcImageData(int x, int y)
 {
 	glm::vec4 color = PerPixel(x, y);
