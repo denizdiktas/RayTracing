@@ -22,6 +22,7 @@ public:
 	void OnResize(uint32_t width, uint32_t height);
 	void Render(const Scene& scene, const Camera& camera);
 	void CalcImageData(int x, int y);
+	void UpdateImageData(int x, int y, const glm::vec4& color); // use this to set the color directly in the beam-intersection test!
 
 	std::shared_ptr<Walnut::Image> GetFinalImage() const { return m_FinalImage; }
 
