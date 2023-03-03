@@ -189,8 +189,8 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 
 			const auto xmin = tx * tileSizeX;
 			const auto ymin = ty * tileSizeX;
-			const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width-1);
-			const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height-1);
+			const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width) - 1;
+			const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height) - 1;
 
 #ifdef USE_TILE_BEAM_INTERSECTION_TEST
 			// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
@@ -253,18 +253,18 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 			if (!intersectsAnySphere)
 			{
 				const glm::vec4 skyColor = glm::vec4(1,0,0,1);// glm::vec4(0.6f, 0.7f, 0.9f, 1.0f);
-				for (int y = ymin; y < ymax; y++)
+				for (int y = ymin; y <= ymax; y++)
 				{
-					for (int x = xmin; x < xmax; x++)
+					for (int x = xmin; x <= xmax; x++)
 						UpdateImageData(x, y, skyColor);
 				}
 				return;
 			}
 #endif
 
-			for (int y = ymin; y < ymax; y++)
+			for (int y = ymin; y <= ymax; y++)
 			{
-				for (int x = xmin; x < xmax; x++)
+				for (int x = xmin; x <= xmax; x++)
 					CalcImageData(x, y);
 			}
 
@@ -343,7 +343,7 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 {
 	Ray ray;
 	ray.Origin = m_ActiveCamera->GetPosition();
-	ray.Direction = m_ActiveCamera->GetRayDirections()[x + y * m_FinalImage->GetWidth()];
+	ray.Direction = m_ActiveCamera->GetRayDirections(x,y);
 	
 	glm::vec3 color(0.0f);
 	float multiplier = 1.0f;
