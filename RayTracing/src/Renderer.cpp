@@ -203,13 +203,13 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				
 			// get the corner directions:
 			const auto width = m_FinalImage->GetWidth();
-			auto d0 = m_ActiveCamera->GetRayDirections()[xmin + ymin * width];
-			auto d1 = m_ActiveCamera->GetRayDirections()[xmax + ymin * width];
-			auto d2 = m_ActiveCamera->GetRayDirections()[xmax + ymax * width];
-			auto d3 = m_ActiveCamera->GetRayDirections()[xmin + ymax * width];
+			auto d0 = m_ActiveCamera->GetRayDirections(xmin, ymin);
+			auto d1 = m_ActiveCamera->GetRayDirections(xmax, ymin);
+			auto d2 = m_ActiveCamera->GetRayDirections(xmax, ymax);
+			auto d3 = m_ActiveCamera->GetRayDirections(xmin, ymax);
 			const auto xmid = (xmin + xmax) / 2;
 			const auto ymid = (ymin + ymax) / 2;
-			auto midRayDir = m_ActiveCamera->GetRayDirections()[xmid + ymid * width];
+			auto midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
 
 			glm::vec3 faceNormals[] = {
 					glm::normalize(glm::cross(d0, d1)), // PLANE #0: LOWER FACE 

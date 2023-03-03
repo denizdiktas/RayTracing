@@ -20,6 +20,7 @@ public:
 	const glm::vec3& GetDirection() const { return m_ForwardDirection; }
 
 	const std::vector<glm::vec3>& GetRayDirections() const { return m_RayDirections; }
+	const glm::vec3& GetRayDirections(int x, int y) const { return m_RayDirections[x + y* m_ViewportWidth]; }
 
 	float GetRotationSpeed();
 private:
