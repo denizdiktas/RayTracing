@@ -112,6 +112,43 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 }
 
 
+#ifdef USE_TILE_BEAM_INTERSECTION_TEST
+struct TileBeam
+{
+	glm::vec3 midRayDir;
+	glm::vec3 faceNormals[4];
+
+	void computeFaceNormals(const glm::vec3& d0, const glm::vec3& d1, const glm::vec3& d2, const glm::vec3& d3)
+	{
+		faceNormals[0] = glm::normalize(glm::cross(d0, d1)); // PLANE #0: LOWER FACE 
+		faceNormals[1] = glm::normalize(glm::cross(d1, d2)); // PLANE #1: RIGHT FACE 
+		faceNormals[2] = glm::normalize(glm::cross(d2, d3)); // PLANE #2: UPPER FACE 
+		faceNormals[3] = glm::normalize(glm::cross(d3, d0)); // PLANE #3: LEFT FACE
+	}
+
+	// all beams originate at EYE, they share this point as their COMMON ORIGIN
+	bool intersects(const Sphere& s, const glm::vec3& eye)
+	{
+		const auto diff = s.Position - eye;
+
+		// special case for the eye position and the mid-plane
+		if (glm::dot(diff, -midRayDir) > 0 && glm::dot(diff, diff) > s.Radius * s.Radius)
+		{
+			return false;
+		}
+
+		for (const auto& n : faceNormals)
+		{
+			if (glm::dot(diff, n) > s.Radius)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+};
+#endif
 
 void Renderer::Render(const Scene& scene, const Camera& camera)
 {
@@ -182,81 +219,63 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	//for (int ty = 0; ty < tileIterY.size(); ty++)
 	std::for_each(std::execution::par, tileIterY.begin(), tileIterY.end(), [&](uint32_t ty)
 	{
-		std::for_each(std::execution::par, tileIterX.begin(), tileIterX.end(),[&,ty](uint32_t tx)
-		{
-			thread_local static const int tid = globalThreadCount++;
-			Walnut::Timer localTimer;
+			std::for_each(std::execution::par, tileIterX.begin(), tileIterX.end(), [&, ty](uint32_t tx)
+				{
+					thread_local static const int tid = globalThreadCount++;
+					Walnut::Timer localTimer;
 
-			const auto xmin = tx * tileSizeX;
-			const auto ymin = ty * tileSizeX;
-			const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width) - 1;
-			const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height) - 1;
+					const auto xmin = tx * tileSizeX;
+					const auto ymin = ty * tileSizeX;
+					const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width) - 1;
+					const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height) - 1;
 
 #ifdef USE_TILE_BEAM_INTERSECTION_TEST
-			// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
-			//                         this could be called "TILE-BASED VF-CULLING"
-			// NOTE: the beam is defined as the pyramid starting at the EYE and SPANNED by the 4 CORNER-DIRECTIONS
+					// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
+					//                         this could be called "TILE-BASED VF-CULLING"
+					// NOTE: the beam is defined as the pyramid starting at the EYE and SPANNED by the 4 CORNER-DIRECTIONS
 
-			// SIMPLE COMPUTATIONS FOR NOW:
-			// NOTE: there is a trade-off between the check for the computation of the intersection test
-			// CAUTION: all plane-normals POINT OUTWARD !!!
-				
-			// get the corner directions:
-			const auto width = m_FinalImage->GetWidth();
-			auto d0 = m_ActiveCamera->GetRayDirections(xmin, ymin);
-			auto d1 = m_ActiveCamera->GetRayDirections(xmax, ymin);
-			auto d2 = m_ActiveCamera->GetRayDirections(xmax, ymax);
-			auto d3 = m_ActiveCamera->GetRayDirections(xmin, ymax);
-			const auto xmid = (xmin + xmax) / 2;
-			const auto ymid = (ymin + ymax) / 2;
-			auto midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
+					// SIMPLE COMPUTATIONS FOR NOW:
+					// NOTE: there is a trade-off between the check for the computation of the intersection test
+					// CAUTION: all plane-normals POINT OUTWARD !!!
 
-			glm::vec3 faceNormals[] = {
-					glm::normalize(glm::cross(d0, d1)), // PLANE #0: LOWER FACE 
-					glm::normalize(glm::cross(d1, d2)), // PLANE #1: RIGHT FACE 
-					glm::normalize(glm::cross(d2, d3)), // PLANE #2: UPPER FACE 
-					glm::normalize(glm::cross(d3, d0))  // PLANE #3: LEFT FACE
-			};
+					// get the corner directions:
+					const auto width = m_FinalImage->GetWidth();
+					auto d0 = m_ActiveCamera->GetRayDirections(xmin, ymin);
+					auto d1 = m_ActiveCamera->GetRayDirections(xmax, ymin);
+					auto d2 = m_ActiveCamera->GetRayDirections(xmax, ymax);
+					auto d3 = m_ActiveCamera->GetRayDirections(xmin, ymax);
+					const auto xmid = (xmin + xmax) / 2;
+					const auto ymid = (ymin + ymax) / 2;
 
-				
-			// check until a sphere is intersected
-			const auto& eye = m_ActiveCamera->GetPosition();
-			bool intersectsAnySphere = false;
-			for (auto& s : m_ActiveScene->Spheres)
-			{
-				bool intersectsCurrentSphere = true;
-				const auto diff = s.Position - eye;
 
-				// special case for the eye position and the mid-plane
-				if (glm::dot(diff, -midRayDir) > 0 && glm::dot(diff, diff) > s.Radius * s.Radius)
-				{
-					intersectsCurrentSphere = false;
-					break;
-				}
+					TileBeam tb;
+					tb.computeFaceNormals(d0, d1, d2, d3);
+					tb.midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
 
-				for (const auto& n : faceNormals)
-				{
-					if (glm::dot(diff, n) > s.Radius)
+
+
+					// check until a sphere is intersected
+					const auto& eye = m_ActiveCamera->GetPosition();
+					bool intersectsAnySphere = false;
+					for (auto& currentSphere : m_ActiveScene->Spheres)
 					{
-						intersectsCurrentSphere = false;
-						break;
+						bool intersectsCurrentSphere = true;
+						if (tb.intersects(currentSphere, eye))
+						{
+							intersectsAnySphere = true;
+							break;
+						}
 					}
-				}
 
-				if (intersectsCurrentSphere)
-				{
-					intersectsAnySphere = true;
-					break;
-				}
-			}
-
-			if (!intersectsAnySphere)
-			{
-				const glm::vec4 skyColor = glm::vec4(1,0,0,1);// glm::vec4(0.6f, 0.7f, 0.9f, 1.0f);
-				for (int y = ymin; y <= ymax; y++)
-				{
-					for (int x = xmin; x <= xmax; x++)
-						UpdateImageData(x, y, skyColor);
+					// if no objects are hit, just set all of the pixels inside the current tile to the sky-color!
+					if (!intersectsAnySphere)
+					{
+						static const glm::vec4 red(1, 0, 0, 1);
+						static const glm::vec4 skyColor = glm::vec4(0.6f, 0.7f, 0.9f, 1.0f);
+						for (int y = ymin; y <= ymax; y++)
+						{
+							for (int x = xmin; x <= xmax; x++)
+								UpdateImageData(x, y, red); // skyColor);
 				}
 				return;
 			}
