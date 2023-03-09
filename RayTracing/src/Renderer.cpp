@@ -4,27 +4,8 @@
 #include "Walnut/Timer.h"
 #include "ThreadLocalRandom.h"
 
-#include <atomic>
 #include <execution>
 
-#include "TileBeam.h"
-
-
-// PREPROCESSOR SWITCHES
-#define MT
-#define THREAD_LOCAL_RANDOM
-#define USE_CACHED_RANDOM_NORMALS
-
-// IMPORTANT: you have to select one of the task granularity levels below
-//#define MT_TASK_GRANULARITY_PIXEL
-//#define MT_TASK_GRANULARITY_ROW
-//#define MT_TASK_GRANULARITY_COL
-#define MT_TASK_GRANULARITY_TILE
-static const int g_TileSizeX = 8;
-static const int g_TileSizeY = 8;
-
-// the following can be used only for tile-based rendering
-#define USE_TILE_BEAM_INTERSECTION_TEST
 
 
 namespace Utils {
@@ -42,27 +23,13 @@ namespace Utils {
 
 }
 
-namespace {
-	const int				g_NumRandomNormals = 1024 * 1024;
-	thread_local int		g_CurrentRandomNormal = 0;
-	std::vector<glm::vec3>	g_RandomNormals;
-	
-	std::atomic<int>	g_GlobalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
-	std::vector<float>	g_TotalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
-
-	int g_NumTilesX, g_NumTilesY;
-	std::vector<int> g_TileIterX, g_TileIterY;
-	std::vector<TileBeam> g_TileBeams;
-	bool g_UpdateTileBeams = true;
-}
-
 
 Renderer::Renderer()
 {
 #ifdef USE_CACHED_RANDOM_NORMALS
-	g_RandomNormals.reserve(g_NumRandomNormals);
-	for (int i = 0; i < g_NumRandomNormals; i++)
-		g_RandomNormals.push_back(Walnut::Random::Vec3(-.5, .5));
+	m_RandomNormals.reserve(m_NumRandomNormals);
+	for (int i = 0; i < m_NumRandomNormals; i++)
+		m_RandomNormals.push_back(Walnut::Random::Vec3(-.5, .5));
 	//randomNormals.push_back(glm::normalize(Walnut::Random::Vec3(-.5, .5)));
 #endif
 }
@@ -97,15 +64,15 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 
 
 	// for tiled rendering
-	g_NumTilesX = (width + g_TileSizeX - 1) / g_TileSizeX;
-	g_NumTilesY = (height + g_TileSizeY - 1) / g_TileSizeY;
-	g_TileIterX.resize(g_NumTilesX);
-	g_TileIterY.resize(g_NumTilesY);
-	for (int i = 0; i < g_NumTilesX; i++)
-		g_TileIterX[i] = i;
-	for (int i = 0; i < g_NumTilesY; i++)
-		g_TileIterY[i] = i;
-	g_UpdateTileBeams = true;
+	m_NumTilesX = (width + m_TileSizeX - 1) / m_TileSizeX;
+	m_NumTilesY = (height + m_TileSizeY - 1) / m_TileSizeY;
+	m_TileIterX.resize(m_NumTilesX);
+	m_TileIterY.resize(m_NumTilesY);
+	for (int i = 0; i < m_NumTilesX; i++)
+		m_TileIterX[i] = i;
+	for (int i = 0; i < m_NumTilesY; i++)
+		m_TileIterY[i] = i;
+	m_UpdateTileBeams = true;
 
 	// be conservative for the number of threads (max of columns and rows)
 	const auto maxThreads = std::max(width, height);
@@ -114,7 +81,7 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 	//       but if you suspect that it might be the case, use the following line:
 	// const auto maxThreads = width * height;
 
-	g_TotalFrameTimePerThread.resize(maxThreads, 0);
+	m_TotalFrameTimePerThread.resize(maxThreads, 0);
 }
 
 
@@ -140,13 +107,13 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	{
 		std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this, y](uint32_t x)
 		{
-			thread_local static const int tid = globalThreadCount++;
+			thread_local static const int tid = g_GlobalThreadCount++;
 			Walnut::Timer localTimer;
 
 			CalcImageData(x, y);
 
 			const auto localElapsedTime = localTimer.ElapsedMillis();
-			totalFrameTimePerThread[tid] += localElapsedTime;
+			g_TotalFrameTimePerThread[tid] += localElapsedTime;
 		});
 	});
 	
@@ -154,7 +121,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
 	{
-		thread_local static const int tid = globalThreadCount++;
+		thread_local static const int tid = g_GlobalThreadCount++;
 		Walnut::Timer localTimer;
 			
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
@@ -163,14 +130,14 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		}
 
 		const auto localElapsedTime = localTimer.ElapsedMillis();
-		totalFrameTimePerThread[tid] += localElapsedTime;
+		g_TotalFrameTimePerThread[tid] += localElapsedTime;
 	});
 
 	#elif defined(MT_TASK_GRANULARITY_COL)
 
 	std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this](uint32_t x)
 	{
-		thread_local static const int tid = globalThreadCount++;
+		thread_local static const int tid = m_GlobalThreadCount++;
 		Walnut::Timer localTimer;
 
 		for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++)
@@ -179,7 +146,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		}
 
 		const auto localElapsedTime = localTimer.ElapsedMillis();
-		totalFrameTimePerThread[tid] += localElapsedTime;
+		m_TotalFrameTimePerThread[tid] += localElapsedTime;
 	});
 
 	#elif defined(MT_TASK_GRANULARITY_TILE)
@@ -315,9 +282,9 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		// show all average time in each thread:
 		float minAvgTime = std::numeric_limits<float>::max();
 		float maxAvgTime = std::numeric_limits<float>::min();
-		for (int i = 0; i < g_GlobalThreadCount; i++)
+		for (int i = 0; i < m_GlobalThreadCount; i++)
 		{
-			const auto currentAvgTime = g_TotalFrameTimePerThread[i] / m_FrameIndex;
+			const auto currentAvgTime = m_TotalFrameTimePerThread[i] / m_FrameIndex;
 			minAvgTime = std::min(minAvgTime, currentAvgTime);
 			maxAvgTime = std::max(maxAvgTime, currentAvgTime);
 			std::cout << i << ": " << currentAvgTime << std::endl;
@@ -381,18 +348,20 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 
 		multiplier *= 0.5f;
 
-		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
-		ray.Direction = glm::reflect(ray.Direction,
+		// PERTURB the NORMAL by an amount proportonal to the material roughness
 #ifdef USE_CACHED_RANDOM_NORMALS
-			payload.WorldNormal + material.Roughness * g_RandomNormals[g_CurrentRandomNormal++ % g_NumRandomNormals]);
+		static thread_local int	currentRandomNormal = 0;
+		auto perturbedNormal = payload.WorldNormal + material.Roughness * m_RandomNormals[currentRandomNormal++ % m_NumRandomNormals];
 #else
 	#ifdef THREAD_LOCAL_RANDOM
-			payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f));
+		auto perturbedNormal = payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f);
 	#else
-			payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f));
+		auto perturbedNormal = payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f);
 	#endif
 #endif
 
+		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
+		ray.Direction = glm::reflect(ray.Direction, perturbedNormal);
 	}
 
 	return glm::vec4(color, 1.0f);

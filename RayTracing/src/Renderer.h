@@ -9,6 +9,25 @@
 #include <memory>
 #include <glm/glm.hpp>
 
+#include <atomic>
+#include "TileBeam.h"
+
+
+// PREPROCESSOR SWITCHES
+#define MT
+#define THREAD_LOCAL_RANDOM
+#define USE_CACHED_RANDOM_NORMALS
+
+// IMPORTANT: you have to select one of the task granularity levels below
+//#define MT_TASK_GRANULARITY_PIXEL
+//#define MT_TASK_GRANULARITY_ROW
+#define MT_TASK_GRANULARITY_COL
+//#define MT_TASK_GRANULARITY_TILE
+
+// the following can be used only for tile-based rendering
+#define USE_TILE_BEAM_INTERSECTION_TEST
+
+
 class Renderer
 {
 public:
@@ -56,4 +75,18 @@ private:
 	glm::vec4* m_AccumulationData = nullptr;
 
 	uint32_t m_FrameIndex = 1;
+
+protected:
+	const int				m_NumRandomNormals = 1024 * 1024;
+	std::vector<glm::vec3>	m_RandomNormals;
+
+	std::atomic<int>	m_GlobalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
+	std::vector<float>	m_TotalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
+
+	const int m_TileSizeX = 8;
+	const int m_TileSizeY = 8;
+	int m_NumTilesX, m_NumTilesY;
+	std::vector<int>		m_TileIterX, m_TileIterY;
+	std::vector<TileBeam>	m_TileBeams;
+	bool m_UpdateTileBeams = true;
 };
