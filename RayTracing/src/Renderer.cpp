@@ -7,6 +7,8 @@
 #include <atomic>
 #include <execution>
 
+#include "TileBeam.h"
+
 
 // PREPROCESSOR SWITCHES
 #define MT
@@ -18,8 +20,8 @@
 //#define MT_TASK_GRANULARITY_ROW
 //#define MT_TASK_GRANULARITY_COL
 #define MT_TASK_GRANULARITY_TILE
-static const int tileSizeX = 8;
-static const int tileSizeY = 8;
+static const int g_TileSizeX = 8;
+static const int g_TileSizeY = 8;
 
 // the following can be used only for tile-based rendering
 #define USE_TILE_BEAM_INTERSECTION_TEST
@@ -40,20 +42,17 @@ namespace Utils {
 
 }
 
-#include "TileBeam.h"
-
-
 namespace {
-	const int numRandomNormals = 1024 * 1024;
-	thread_local int currentRandomNormal = 0;
-	std::vector<glm::vec3> randomNormals;
+	const int				g_NumRandomNormals = 1024 * 1024;
+	thread_local int		g_CurrentRandomNormal = 0;
+	std::vector<glm::vec3>	g_RandomNormals;
 	
-	std::atomic<int> globalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
-	std::vector<float> totalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
+	std::atomic<int>	g_GlobalThreadCount = 0; // keeps track of the total number of threads in the thread-pool
+	std::vector<float>	g_TotalFrameTimePerThread; // EACH ENTRY keeps track of the TOTAL FRAME TÝME FOR EACH THREAD
 
-	int numTilesX, numTilesY;
-	std::vector<int> tileIterX, tileIterY;
-	std::vector<TileBeam> tileBeams;
+	int g_NumTilesX, g_NumTilesY;
+	std::vector<int> g_TileIterX, g_TileIterY;
+	std::vector<TileBeam> g_TileBeams;
 	bool g_UpdateTileBeams = true;
 }
 
@@ -61,9 +60,9 @@ namespace {
 Renderer::Renderer()
 {
 #ifdef USE_CACHED_RANDOM_NORMALS
-	randomNormals.reserve(numRandomNormals);
-	for (int i = 0; i < numRandomNormals; i++)
-		randomNormals.push_back(Walnut::Random::Vec3(-.5, .5));
+	g_RandomNormals.reserve(g_NumRandomNormals);
+	for (int i = 0; i < g_NumRandomNormals; i++)
+		g_RandomNormals.push_back(Walnut::Random::Vec3(-.5, .5));
 	//randomNormals.push_back(glm::normalize(Walnut::Random::Vec3(-.5, .5)));
 #endif
 }
@@ -98,14 +97,14 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 
 
 	// for tiled rendering
-	numTilesX = (width + tileSizeX - 1) / tileSizeX;
-	numTilesY = (height + tileSizeY - 1) / tileSizeY;
-	tileIterX.resize(numTilesX);
-	tileIterY.resize(numTilesY);
-	for (int i = 0; i < numTilesX; i++)
-		tileIterX[i] = i;
-	for (int i = 0; i < numTilesY; i++)
-		tileIterY[i] = i;
+	g_NumTilesX = (width + g_TileSizeX - 1) / g_TileSizeX;
+	g_NumTilesY = (height + g_TileSizeY - 1) / g_TileSizeY;
+	g_TileIterX.resize(g_NumTilesX);
+	g_TileIterY.resize(g_NumTilesY);
+	for (int i = 0; i < g_NumTilesX; i++)
+		g_TileIterX[i] = i;
+	for (int i = 0; i < g_NumTilesY; i++)
+		g_TileIterY[i] = i;
 	g_UpdateTileBeams = true;
 
 	// be conservative for the number of threads (max of columns and rows)
@@ -115,7 +114,7 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 	//       but if you suspect that it might be the case, use the following line:
 	// const auto maxThreads = width * height;
 
-	totalFrameTimePerThread.resize(maxThreads, 0);
+	g_TotalFrameTimePerThread.resize(maxThreads, 0);
 }
 
 
@@ -192,17 +191,17 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	// RECOMPUTE ALL TILE-BEAMS
 	if (g_UpdateTileBeams)
 	{
-		tileBeams.resize(numTilesX * numTilesY);
-		for (int ty = 0; ty < numTilesY; ty++)
+		g_TileBeams.resize(g_NumTilesX * g_NumTilesY);
+		for (int ty = 0; ty < g_NumTilesY; ty++)
 		{
-			for (int tx = 0; tx < numTilesX; tx++)
+			for (int tx = 0; tx < g_NumTilesX; tx++)
 			{
-				auto& tb = tileBeams[tx + ty * numTilesX];
+				auto& tb = g_TileBeams[tx + ty * g_NumTilesX];
 
-				const auto xmin = tx * tileSizeX;
-				const auto ymin = ty * tileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height) - 1;
+				const auto xmin = tx * g_TileSizeX;
+				const auto ymin = ty * g_TileSizeY;
+				const auto xmax = std::min<uint32_t>(xmin + g_TileSizeX, width) - 1;
+				const auto ymax = std::min<uint32_t>(ymin + g_TileSizeY, height) - 1;
 
 				// get the corner directions:
 				const auto width = m_FinalImage->GetWidth();
@@ -223,17 +222,17 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	
 	
 	//for (int ty = 0; ty < tileIterY.size(); ty++)
-	std::for_each(std::execution::par, tileIterY.begin(), tileIterY.end(), [&](uint32_t ty)
+	std::for_each(std::execution::par, g_TileIterY.begin(), g_TileIterY.end(), [&](uint32_t ty)
 	{
-			std::for_each(std::execution::par, tileIterX.begin(), tileIterX.end(), [&, ty](uint32_t tx)
+			std::for_each(std::execution::par, g_TileIterX.begin(), g_TileIterX.end(), [&, ty](uint32_t tx)
 			{
-				thread_local static const int tid = globalThreadCount++;
+				thread_local static const int tid = g_GlobalThreadCount++;
 				Walnut::Timer localTimer;
 
-				const auto xmin = tx * tileSizeX;
-				const auto ymin = ty * tileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + tileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + tileSizeY, height) - 1;
+				const auto xmin = tx * g_TileSizeX;
+				const auto ymin = ty * g_TileSizeY;
+				const auto xmax = std::min<uint32_t>(xmin + g_TileSizeX, width) - 1;
+				const auto ymax = std::min<uint32_t>(ymin + g_TileSizeY, height) - 1;
 
 #ifdef USE_TILE_BEAM_INTERSECTION_TEST
 				// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
@@ -244,7 +243,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				// NOTE: there is a trade-off between the check for the computation of the intersection test
 				// CAUTION: all plane-normals POINT OUTWARD !!!
 
-				auto& tb = tileBeams[tx + ty * numTilesX];
+				auto& tb = g_TileBeams[tx + ty * g_NumTilesX];
 
 				// check until a sphere is intersected
 				const auto& eye = m_ActiveCamera->GetPosition();
@@ -280,7 +279,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				}
 
 				const auto localElapsedTime = localTimer.ElapsedMillis();
-				totalFrameTimePerThread[tid] += localElapsedTime;
+				g_TotalFrameTimePerThread[tid] += localElapsedTime;
 		});
 	});
 	//}
@@ -316,9 +315,9 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		// show all average time in each thread:
 		float minAvgTime = std::numeric_limits<float>::max();
 		float maxAvgTime = std::numeric_limits<float>::min();
-		for (int i = 0; i < globalThreadCount; i++)
+		for (int i = 0; i < g_GlobalThreadCount; i++)
 		{
-			const auto currentAvgTime = totalFrameTimePerThread[i] / m_FrameIndex;
+			const auto currentAvgTime = g_TotalFrameTimePerThread[i] / m_FrameIndex;
 			minAvgTime = std::min(minAvgTime, currentAvgTime);
 			maxAvgTime = std::max(maxAvgTime, currentAvgTime);
 			std::cout << i << ": " << currentAvgTime << std::endl;
@@ -385,7 +384,7 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
 		ray.Direction = glm::reflect(ray.Direction,
 #ifdef USE_CACHED_RANDOM_NORMALS
-			payload.WorldNormal + material.Roughness * randomNormals[currentRandomNormal++ % numRandomNormals]);
+			payload.WorldNormal + material.Roughness * g_RandomNormals[g_CurrentRandomNormal++ % g_NumRandomNormals]);
 #else
 	#ifdef THREAD_LOCAL_RANDOM
 			payload.WorldNormal + material.Roughness * Walnut::ThreadLocal::Random::Vec3(-0.5f, 0.5f));
