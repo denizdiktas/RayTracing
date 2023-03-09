@@ -107,7 +107,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	{
 		std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this, y](uint32_t x)
 		{
-			thread_local static const int tid = g_GlobalThreadCount++;
+			thread_local static const int tid = m_GlobalThreadCount++;
 			Walnut::Timer localTimer;
 
 			CalcImageData(x, y);
@@ -121,7 +121,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
 	{
-		thread_local static const int tid = g_GlobalThreadCount++;
+		thread_local static const int tid = m_GlobalThreadCount++;
 		Walnut::Timer localTimer;
 			
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
@@ -156,19 +156,19 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 
 #ifdef USE_TILE_BEAM_INTERSECTION_TEST
 	// RECOMPUTE ALL TILE-BEAMS
-	if (g_UpdateTileBeams)
+	if (m_UpdateTileBeams)
 	{
-		g_TileBeams.resize(g_NumTilesX * g_NumTilesY);
-		for (int ty = 0; ty < g_NumTilesY; ty++)
+		m_TileBeams.resize(m_NumTilesX * m_NumTilesY);
+		for (int ty = 0; ty < m_NumTilesY; ty++)
 		{
-			for (int tx = 0; tx < g_NumTilesX; tx++)
+			for (int tx = 0; tx < m_NumTilesX; tx++)
 			{
-				auto& tb = g_TileBeams[tx + ty * g_NumTilesX];
+				auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
 
-				const auto xmin = tx * g_TileSizeX;
-				const auto ymin = ty * g_TileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + g_TileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + g_TileSizeY, height) - 1;
+				const auto xmin = tx * m_TileSizeX;
+				const auto ymin = ty * m_TileSizeY;
+				const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
+				const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
 
 				// get the corner directions:
 				const auto width = m_FinalImage->GetWidth();
@@ -183,23 +183,23 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				tb.midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
 			}
 		}
-		g_UpdateTileBeams = false;
+		m_UpdateTileBeams = false;
 	}
 #endif
 	
 	
 	//for (int ty = 0; ty < tileIterY.size(); ty++)
-	std::for_each(std::execution::par, g_TileIterY.begin(), g_TileIterY.end(), [&](uint32_t ty)
+	std::for_each(std::execution::par, m_TileIterY.begin(), m_TileIterY.end(), [&](uint32_t ty)
 	{
-			std::for_each(std::execution::par, g_TileIterX.begin(), g_TileIterX.end(), [&, ty](uint32_t tx)
+			std::for_each(std::execution::par, m_TileIterX.begin(), m_TileIterX.end(), [&, ty](uint32_t tx)
 			{
-				thread_local static const int tid = g_GlobalThreadCount++;
+				thread_local static const int tid = m_GlobalThreadCount++;
 				Walnut::Timer localTimer;
 
-				const auto xmin = tx * g_TileSizeX;
-				const auto ymin = ty * g_TileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + g_TileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + g_TileSizeY, height) - 1;
+				const auto xmin = tx * m_TileSizeX;
+				const auto ymin = ty * m_TileSizeY;
+				const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
+				const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
 
 #ifdef USE_TILE_BEAM_INTERSECTION_TEST
 				// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
@@ -210,7 +210,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				// NOTE: there is a trade-off between the check for the computation of the intersection test
 				// CAUTION: all plane-normals POINT OUTWARD !!!
 
-				auto& tb = g_TileBeams[tx + ty * g_NumTilesX];
+				auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
 
 				// check until a sphere is intersected
 				const auto& eye = m_ActiveCamera->GetPosition();
@@ -246,7 +246,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 				}
 
 				const auto localElapsedTime = localTimer.ElapsedMillis();
-				g_TotalFrameTimePerThread[tid] += localElapsedTime;
+				m_TotalFrameTimePerThread[tid] += localElapsedTime;
 		});
 	});
 	//}

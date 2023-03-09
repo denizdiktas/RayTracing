@@ -21,8 +21,8 @@
 // IMPORTANT: you have to select one of the task granularity levels below
 //#define MT_TASK_GRANULARITY_PIXEL
 //#define MT_TASK_GRANULARITY_ROW
-#define MT_TASK_GRANULARITY_COL
-//#define MT_TASK_GRANULARITY_TILE
+//#define MT_TASK_GRANULARITY_COL
+#define MT_TASK_GRANULARITY_TILE
 
 // the following can be used only for tile-based rendering
 #define USE_TILE_BEAM_INTERSECTION_TEST
