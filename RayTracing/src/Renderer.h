@@ -40,9 +40,18 @@ public:
 
 	void OnResize(uint32_t width, uint32_t height);
 	void Render(const Scene& scene, const Camera& camera);
+
+private:
+	// code run under different switches
+	void mtTaskGranularityPixel();
+	void mtTaskGranularityRow();
+	void mtTaskGranularityCol();
+	void mtTaskGranularityTile();
+
 	void CalcImageData(int x, int y);
 	void UpdateImageData(int x, int y, const glm::vec4& color); // use this to set the color directly in the beam-intersection test!
 
+public:
 	std::shared_ptr<Walnut::Image> GetFinalImage() const { return m_FinalImage; }
 
 	void ResetFrameIndex() { m_FrameIndex = 1; }

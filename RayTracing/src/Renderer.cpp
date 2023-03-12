@@ -102,154 +102,16 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 
 #ifdef MT
 	#ifdef MT_TASK_GRANULARITY_PIXEL
-	
-	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
-	{
-		std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this, y](uint32_t x)
-		{
-			thread_local static const int tid = m_GlobalThreadCount++;
-			Walnut::Timer localTimer;
+	mtTaskGranularityPixel();	
 
-			CalcImageData(x, y);
-
-			const auto localElapsedTime = localTimer.ElapsedMillis();
-			g_TotalFrameTimePerThread[tid] += localElapsedTime;
-		});
-	});
-	
 	#elif defined(MT_TASK_GRANULARITY_ROW)
-
-	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
-	{
-		thread_local static const int tid = m_GlobalThreadCount++;
-		Walnut::Timer localTimer;
-			
-		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
-		{
-			CalcImageData(x, y);
-		}
-
-		const auto localElapsedTime = localTimer.ElapsedMillis();
-		g_TotalFrameTimePerThread[tid] += localElapsedTime;
-	});
+	mtTaskGranularityRow();
 
 	#elif defined(MT_TASK_GRANULARITY_COL)
-
-	std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this](uint32_t x)
-	{
-		thread_local static const int tid = m_GlobalThreadCount++;
-		Walnut::Timer localTimer;
-
-		for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++)
-		{
-			CalcImageData(x, y);
-		}
-
-		const auto localElapsedTime = localTimer.ElapsedMillis();
-		m_TotalFrameTimePerThread[tid] += localElapsedTime;
-	});
+	mtTaskGranularityCol();
 
 	#elif defined(MT_TASK_GRANULARITY_TILE)
-	
-	const auto width = m_FinalImage->GetWidth();
-	const auto height = m_FinalImage->GetHeight();
-
-#ifdef USE_TILE_BEAM_INTERSECTION_TEST
-	// RECOMPUTE ALL TILE-BEAMS
-	if (m_UpdateTileBeams)
-	{
-		m_TileBeams.resize(m_NumTilesX * m_NumTilesY);
-		for (int ty = 0; ty < m_NumTilesY; ty++)
-		{
-			for (int tx = 0; tx < m_NumTilesX; tx++)
-			{
-				auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
-
-				const auto xmin = tx * m_TileSizeX;
-				const auto ymin = ty * m_TileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
-
-				// get the corner directions:
-				const auto width = m_FinalImage->GetWidth();
-				auto d0 = m_ActiveCamera->GetRayDirections(xmin, ymin);
-				auto d1 = m_ActiveCamera->GetRayDirections(xmax, ymin);
-				auto d2 = m_ActiveCamera->GetRayDirections(xmax, ymax);
-				auto d3 = m_ActiveCamera->GetRayDirections(xmin, ymax);
-				const auto xmid = (xmin + xmax) / 2;
-				const auto ymid = (ymin + ymax) / 2;
-
-				tb.computeFaceNormals(d0, d1, d2, d3);
-				tb.midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
-			}
-		}
-		m_UpdateTileBeams = false;
-	}
-#endif
-	
-	
-	//for (int ty = 0; ty < tileIterY.size(); ty++)
-	std::for_each(std::execution::par, m_TileIterY.begin(), m_TileIterY.end(), [&](uint32_t ty)
-	{
-			std::for_each(std::execution::par, m_TileIterX.begin(), m_TileIterX.end(), [&, ty](uint32_t tx)
-			{
-				thread_local static const int tid = m_GlobalThreadCount++;
-				Walnut::Timer localTimer;
-
-				const auto xmin = tx * m_TileSizeX;
-				const auto ymin = ty * m_TileSizeY;
-				const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
-				const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
-
-#ifdef USE_TILE_BEAM_INTERSECTION_TEST
-				// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
-				//                         this could be called "TILE-BASED VF-CULLING"
-				// NOTE: the beam is defined as the pyramid starting at the EYE and SPANNED by the 4 CORNER-DIRECTIONS
-
-				// SIMPLE COMPUTATIONS FOR NOW:
-				// NOTE: there is a trade-off between the check for the computation of the intersection test
-				// CAUTION: all plane-normals POINT OUTWARD !!!
-
-				auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
-
-				// check until a sphere is intersected
-				const auto& eye = m_ActiveCamera->GetPosition();
-				bool intersectsAnySphere = false;
-				for (auto& currentSphere : m_ActiveScene->Spheres)
-				{
-					bool intersectsCurrentSphere = true;
-					if (tb.intersects(currentSphere, eye))
-					{
-						intersectsAnySphere = true;
-						break;
-					}
-				}
-
-				// if no objects are hit, just set all of the pixels inside the current tile to the sky-color!
-				if (!intersectsAnySphere)
-				{
-					static const glm::vec4 red(1, 0, 0, 1);
-					static const glm::vec4 skyColor = glm::vec4(0.6f, 0.7f, 0.9f, 1.0f);
-					for (int y = ymin; y <= ymax; y++)
-					{
-						for (int x = xmin; x <= xmax; x++)
-							UpdateImageData(x, y, red); // skyColor);
-					}
-					return;
-				}
-#endif
-
-				for (int y = ymin; y <= ymax; y++)
-				{
-					for (int x = xmin; x <= xmax; x++)
-						CalcImageData(x, y);
-				}
-
-				const auto localElapsedTime = localTimer.ElapsedMillis();
-				m_TotalFrameTimePerThread[tid] += localElapsedTime;
-		});
-	});
-	//}
+	mtTaskGranularityTile();
 
 	#endif
 
@@ -295,7 +157,161 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 		lastAccTime = accTime;
 	}
 }
+void Renderer::mtTaskGranularityPixel()
+{
+	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
+		{
+			std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this, y](uint32_t x)
+				{
+					thread_local static const int tid = m_GlobalThreadCount++;
+					Walnut::Timer localTimer;
 
+					CalcImageData(x, y);
+
+					const auto localElapsedTime = localTimer.ElapsedMillis();
+					m_TotalFrameTimePerThread[tid] += localElapsedTime;
+				}
+			);
+		}
+	);
+}
+void Renderer::mtTaskGranularityRow()
+{
+	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y)
+		{
+			thread_local static const int tid = m_GlobalThreadCount++;
+			Walnut::Timer localTimer;
+
+			for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
+			{
+				CalcImageData(x, y);
+			}
+
+			const auto localElapsedTime = localTimer.ElapsedMillis();
+			m_TotalFrameTimePerThread[tid] += localElapsedTime;
+		}
+	);
+}
+void Renderer::mtTaskGranularityCol()
+{
+	std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(), [this](uint32_t x)
+		{
+			thread_local static const int tid = m_GlobalThreadCount++;
+			Walnut::Timer localTimer;
+
+			for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++)
+			{
+				CalcImageData(x, y);
+			}
+
+			const auto localElapsedTime = localTimer.ElapsedMillis();
+			m_TotalFrameTimePerThread[tid] += localElapsedTime;
+		}
+	);
+}
+void Renderer::mtTaskGranularityTile()
+{
+	const auto width = m_FinalImage->GetWidth();
+	const auto height = m_FinalImage->GetHeight();
+
+#ifdef USE_TILE_BEAM_INTERSECTION_TEST
+	// RECOMPUTE ALL TILE-BEAMS
+	if (m_UpdateTileBeams)
+	{
+		m_TileBeams.resize(m_NumTilesX * m_NumTilesY);
+		for (int ty = 0; ty < m_NumTilesY; ty++)
+		{
+			for (int tx = 0; tx < m_NumTilesX; tx++)
+			{
+				auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
+
+				const auto xmin = tx * m_TileSizeX;
+				const auto ymin = ty * m_TileSizeY;
+				const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
+				const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
+
+				// get the corner directions:
+				const auto width = m_FinalImage->GetWidth();
+				auto d0 = m_ActiveCamera->GetRayDirections(xmin, ymin);
+				auto d1 = m_ActiveCamera->GetRayDirections(xmax, ymin);
+				auto d2 = m_ActiveCamera->GetRayDirections(xmax, ymax);
+				auto d3 = m_ActiveCamera->GetRayDirections(xmin, ymax);
+				const auto xmid = (xmin + xmax) / 2;
+				const auto ymid = (ymin + ymax) / 2;
+
+				tb.computeFaceNormals(d0, d1, d2, d3);
+				tb.midRayDir = m_ActiveCamera->GetRayDirections(xmid, ymid);
+}
+		}
+		m_UpdateTileBeams = false;
+	}
+#endif
+
+
+	//for (int ty = 0; ty < tileIterY.size(); ty++)
+	std::for_each(std::execution::par, m_TileIterY.begin(), m_TileIterY.end(), [&](uint32_t ty)
+		{
+			std::for_each(std::execution::par, m_TileIterX.begin(), m_TileIterX.end(), [&, ty](uint32_t tx)
+				{
+					thread_local static const int tid = m_GlobalThreadCount++;
+					Walnut::Timer localTimer;
+
+					const auto xmin = tx * m_TileSizeX;
+					const auto ymin = ty * m_TileSizeY;
+					const auto xmax = std::min<uint32_t>(xmin + m_TileSizeX, width) - 1;
+					const auto ymax = std::min<uint32_t>(ymin + m_TileSizeY, height) - 1;
+
+#ifdef USE_TILE_BEAM_INTERSECTION_TEST
+					// BEAM INTERSECTION TEST: check if any sphere intersects the beam, if yes then proceed with the intersection test
+					//                         this could be called "TILE-BASED VF-CULLING"
+					// NOTE: the beam is defined as the pyramid starting at the EYE and SPANNED by the 4 CORNER-DIRECTIONS
+
+					// SIMPLE COMPUTATIONS FOR NOW:
+					// NOTE: there is a trade-off between the check for the computation of the intersection test
+					// CAUTION: all plane-normals POINT OUTWARD !!!
+
+					auto& tb = m_TileBeams[tx + ty * m_NumTilesX];
+
+					// check until a sphere is intersected
+					const auto& eye = m_ActiveCamera->GetPosition();
+					bool intersectsAnySphere = false;
+					for (auto& currentSphere : m_ActiveScene->Spheres)
+					{
+						bool intersectsCurrentSphere = true;
+						if (tb.intersects(currentSphere, eye))
+						{
+							intersectsAnySphere = true;
+							break;
+						}
+					}
+
+					// if no objects are hit, just set all of the pixels inside the current tile to the sky-color!
+					if (!intersectsAnySphere)
+					{
+						static const glm::vec4 red(1, 0, 0, 1);
+						static const glm::vec4 skyColor = glm::vec4(0.6f, 0.7f, 0.9f, 1.0f);
+						for (int y = ymin; y <= ymax; y++)
+						{
+							for (int x = xmin; x <= xmax; x++)
+								UpdateImageData(x, y, red); // skyColor);
+						}
+						return;
+					}
+#endif
+
+					for (int y = ymin; y <= ymax; y++)
+					{
+						for (int x = xmin; x <= xmax; x++)
+							CalcImageData(x, y);
+					}
+
+					const auto localElapsedTime = localTimer.ElapsedMillis();
+					m_TotalFrameTimePerThread[tid] += localElapsedTime;
+				});
+		});
+	//}
+
+}
 
 void Renderer::CalcImageData(int x, int y)
 {
